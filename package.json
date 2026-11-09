@@ -1,0 +1,9 @@
+{
+  "name": "pmb-nusantara",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Portal Penerimaan Mahasiswa Baru",
+  "scripts": {
+    "start": "node server.js"
+  }
+}
