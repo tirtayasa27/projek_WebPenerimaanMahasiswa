@@ -1,7 +1,21 @@
+const SUPABASE_CONFIG = {
+  url: "https://hlqhuuiuvgkzgvvygoxs.supabase.co",
+  anonKey: "sb_publishable_PQVCshBEbFjyoBi3FaEVPQ_V5c5fM0z"
+};
+
+const supabaseClient =
+  window.supabase &&
+  SUPABASE_CONFIG.url.startsWith("http") &&
+  SUPABASE_CONFIG.anonKey &&
+  !SUPABASE_CONFIG.anonKey.startsWith("ISI_")
+    ? window.supabase.createClient(SUPABASE_CONFIG.url, SUPABASE_CONFIG.anonKey)
+    : null;
+
 const initialState = {
   role: "applicant",
   activePage: "overview",
   applicant: {
+    id: null,
     name: "Alya Rahma Putri",
     email: "alya.rahma@email.com",
     phone: "0812 3456 7890",
@@ -19,11 +33,11 @@ const initialState = {
     result: "Belum diumumkan"
   },
   applicants: [
-    { number: "PMB26-0001", name: "Rizky Aditya", study: "Manajemen", path: "Prestasi", status: "Terverifikasi" },
-    { number: "PMB26-0002", name: "Alya Rahma Putri", study: "Informatika", path: "Reguler", status: "Menunggu verifikasi" },
-    { number: "PMB26-0003", name: "Nadia Putri", study: "Psikologi", path: "Beasiswa", status: "Perlu perbaikan" },
-    { number: "PMB26-0004", name: "Fajar Ramadhan", study: "Akuntansi", path: "Reguler", status: "Terverifikasi" },
-    { number: "PMB26-0005", name: "Dina Safitri", study: "Ilmu Komunikasi", path: "Prestasi", status: "Menunggu verifikasi" }
+    { number: "PMB26-0001", name: "Rizky Aditya", study: "Manajemen", path: "Prestasi", status: "Terverifikasi", result: "Belum diumumkan" },
+    { number: "PMB26-0002", name: "Alya Rahma Putri", study: "Informatika", path: "Reguler", status: "Menunggu verifikasi", result: "Belum diumumkan" },
+    { number: "PMB26-0003", name: "Nadia Putri", study: "Psikologi", path: "Beasiswa", status: "Perlu perbaikan", result: "Belum diumumkan" },
+    { number: "PMB26-0004", name: "Fajar Ramadhan", study: "Akuntansi", path: "Reguler", status: "Terverifikasi", result: "Belum diumumkan" },
+    { number: "PMB26-0005", name: "Dina Safitri", study: "Ilmu Komunikasi", path: "Prestasi", status: "Menunggu verifikasi", result: "Belum diumumkan" }
   ],
   programs: [
     { name: "Informatika", faculty: "Fakultas Teknologi", quota: 120, icon: "⌘", description: "Bangun solusi digital untuk masa depan." },
@@ -85,6 +99,116 @@ const toast = (message) => {
   toastTimer = setTimeout(() => element.classList.remove("show"), 2600);
 };
 
+const setAddressBarPath = (targetPath) => {
+  if (window.location.pathname !== targetPath) {
+    window.history.pushState({ path: targetPath }, "", targetPath);
+  }
+};
+const syncUrlForRole = (role) => setAddressBarPath(role === "admin" ? "/admin" : "/login");
+const syncUrlForHome = () => setAddressBarPath("/");
+
+const mapRowToApplicant = (row) => ({
+  id: row.id,
+  name: row.full_name || "Calon Mahasiswa",
+  email: row.email || "",
+  phone: row.phone || "",
+  birthPlace: row.birth_place || "",
+  birthDate: row.birth_date || "",
+  gender: row.gender || "Perempuan",
+  address: row.address || "",
+  school: row.school || "",
+  registrationNumber: row.registration_number || "PMB26-0002",
+  studyChoice: row.study_choice || "Informatika",
+  secondChoice: row.second_choice || "Sistem Informasi",
+  path: row.path || "Reguler",
+  documents: state.applicant.documents || {},
+  verification: row.verification || "Menunggu verifikasi",
+  result: row.result || "Belum diumumkan"
+});
+
+const mapApplicantToDbPayload = (applicant, role = "applicant") => ({
+  role,
+  registration_number: applicant.registrationNumber,
+  full_name: applicant.name,
+  email: applicant.email,
+  phone: applicant.phone || "",
+  birth_place: applicant.birthPlace || "",
+  birth_date: applicant.birthDate ? applicant.birthDate : null,
+  gender: applicant.gender || "Perempuan",
+  address: applicant.address || "",
+  school: applicant.school || "",
+  study_choice: applicant.studyChoice || "Informatika",
+  second_choice: applicant.secondChoice || "Sistem Informasi",
+  path: applicant.path || "Reguler",
+  verification: applicant.verification || "Menunggu verifikasi",
+  result: applicant.result || "Belum diumumkan"
+});
+
+async function syncProfilesFromSupabase() {
+  if (!supabaseClient) return;
+  const { data, error } = await supabaseClient
+    .from("profiles")
+    .select("*")
+    .order("created_at", { ascending: true });
+
+  if (error) {
+    console.warn("Gagal mengambil profil dari Supabase:", error.message);
+    return;
+  }
+  if (!Array.isArray(data) || !data.length) return;
+
+  const applicantRows = data.filter((row) => row.role !== "admin");
+  if (applicantRows.length) {
+    state.applicants = applicantRows.map((row) => ({
+      number: row.registration_number,
+      name: row.full_name,
+      study: row.study_choice || "Informatika",
+      path: row.path || "Reguler",
+      status: row.verification || "Menunggu verifikasi",
+      result: row.result || "Belum diumumkan"
+    }));
+  }
+
+  const matched =
+    data.find((row) => row.email?.toLowerCase() === state.applicant.email?.toLowerCase()) ||
+    applicantRows[0];
+
+  if (matched) {
+    state.applicant = mapRowToApplicant(matched);
+  }
+  save();
+}
+
+async function upsertProfileToSupabase(applicantData, role = "applicant", authUserId = null) {
+  if (!supabaseClient) return null;
+  const payload = mapApplicantToDbPayload(applicantData, role);
+  if (authUserId) payload.user_id = authUserId;
+
+  const { data, error } = await supabaseClient
+    .from("profiles")
+    .upsert(payload, { onConflict: "registration_number" })
+    .select()
+    .single();
+
+  if (error) {
+    console.warn("Gagal menyimpan profil ke Supabase:", error.message);
+    return { error };
+  }
+  return { data };
+}
+
+async function updateApplicantFieldsInSupabase(registrationNumber, updates) {
+  if (!supabaseClient || !registrationNumber) return;
+  const { error } = await supabaseClient
+    .from("profiles")
+    .update(updates)
+    .eq("registration_number", registrationNumber);
+
+  if (error) {
+    console.warn("Gagal memperbarui data di Supabase:", error.message);
+  }
+}
+
 const navConfig = {
   applicant: [
     { group: "MENU PENDAFTAR", items: [["overview", "▦", "Ringkasan"], ["biodata", "◉", "Biodata"], ["choices", "◇", "Pilihan studi"], ["documents", "⇧", "Unggah berkas"]] },
@@ -142,6 +266,7 @@ function progressMarkup(percent, label = "Progres pendaftaran") {
   return `<div class="progress-wrap"><div class="progress-label"><span>${label}</span><b>${percent}%</b></div><div class="progress-track"><span style="width:${percent}%"></span></div></div>`;
 }
 function greetingName(email, fallbackName) {
+  if (fallbackName && fallbackName !== "Alya Rahma Putri") return fallbackName.split(/\s+/)[0];
   const localPart = String(email || "").split("@")[0].split("+")[0];
   const nameParts = localPart.split(/[._-]+/).map((part) => part.replace(/\d+/g, "")).filter(Boolean);
   if (!nameParts.length) return fallbackName.split(/\s+/)[0] || "Mahasiswa";
@@ -155,7 +280,7 @@ function stepsMarkup() {
 function renderApplicantPage(page) {
   const a = state.applicant;
   if (page === "overview") return `${pageHeading("Halo, " + escapeHTML(greetingName(a.email, a.name)) + " 👋", "Pantau perjalanan pendaftaranmu di sini.")}<div class="welcome-banner"><div><span>PENDAFTARAN TAHUN AKADEMIK 2026/2027</span><h2>${escapeHTML(a.registrationNumber)}</h2><p>${escapeHTML(a.studyChoice)} · Jalur ${escapeHTML(a.path)}</p></div><button class="button button-gold" data-page="proof">Lihat bukti <span>↗</span></button></div><div class="stat-grid">${statCard("Status pendaftaran", escapeHTML(a.verification), "● Status pemeriksaan berkas")}${statCard("Nomor pendaftaran", escapeHTML(a.registrationNumber), "Nomor identitas PMB")}${statCard("Pilihan program studi", escapeHTML(a.studyChoice), "Pilihan utama")}${statCard("Jalur pendaftaran", escapeHTML(a.path), "Tahun akademik 2026/27")}</div><div class="dashboard-columns"><section class="panel-card"><div class="panel-heading"><h3>Progres pendaftaran</h3><button class="plain-link" data-page="documents">Lengkapi berkas →</button></div>${progressMarkup(a.verification === "Terverifikasi" ? 80 : 45)}${stepsMarkup()}</section><section class="panel-card"><div class="panel-heading"><h3>Informasi penting</h3></div><div class="alert-box"><strong>Jangan lupa melengkapi berkasmu.</strong><br>Pastikan semua dokumen terlihat jelas agar proses verifikasi lebih cepat.</div><div class="panel-heading" style="margin-top:20px"><h3>Pengumuman terbaru</h3></div>${state.announcements.slice(0, 2).map((n) => `<div class="announcement-row"><div><strong>${escapeHTML(n.title)}</strong><p>${escapeHTML(n.date)}</p></div></div>`).join("")}</section></div>`;
-  if (page === "biodata") return `${pageHeading("Biodata diri", "Lengkapi data diri dengan benar sesuai dokumen resmi.")}<form id="biodataForm" class="panel-card"><div class="panel-heading"><div><h3>Informasi pribadi</h3><p>Pastikan data yang kamu masukkan sudah sesuai.</p></div></div><div class="field-grid">${field("Nama lengkap", "name", a.name, "text", true)}${field("Alamat email", "email", a.email, "email", true)}${field("Nomor telepon", "phone", a.phone, "tel", true)}${field("Jenis kelamin", "gender", a.gender, "select", true, ["Perempuan", "Laki-laki"])}${field("Tempat lahir", "birthPlace", a.birthPlace)}${field("Tanggal lahir", "birthDate", a.birthDate, "date")}${field("Asal sekolah", "school", a.school)}${field("Alamat domisili", "address", a.address)}</div><div class="form-actions"><button class="button button-primary">Simpan biodata <span>→</span></button></div></form>`;
+  if (page === "biodata") return `${pageHeading("Biodata diri", "Lengkapi data diri dengan benar sesuai dokumen resmi.")}<form id="biodataForm" class="panel-card"><div class="panel-heading"><div><h3>Informasi pribadi</h3><p>Nama lengkap dan data pribadi tersimpan di database Supabase.</p></div></div><div class="field-grid">${field("Nama lengkap", "name", a.name, "text", true)}${field("Alamat email", "email", a.email, "email", true)}${field("Nomor telepon", "phone", a.phone, "tel", true)}${field("Jenis kelamin", "gender", a.gender, "select", true, ["Perempuan", "Laki-laki"])}${field("Tempat lahir", "birthPlace", a.birthPlace)}${field("Tanggal lahir", "birthDate", a.birthDate, "date")}${field("Asal sekolah", "school", a.school)}${field("Alamat domisili", "address", a.address)}</div><div class="form-actions"><button class="button button-primary">Simpan biodata <span>→</span></button></div></form>`;
   if (page === "choices") return `${pageHeading("Pilihan program studi", "Tentukan program studi dan jalur yang paling sesuai.")}<form id="choicesForm"><section class="panel-card"><div class="panel-heading"><div><h3>Pilihan pertama</h3><p>Pilih program studi prioritasmu.</p></div></div><div class="choice-cards">${state.programs.map((p) => `<label class="choice-card ${a.studyChoice === p.name ? "selected" : ""}"><input type="radio" name="studyChoice" value="${escapeHTML(p.name)}" ${a.studyChoice === p.name ? "checked" : ""}> <strong>${escapeHTML(p.name)}</strong><small>${escapeHTML(p.faculty)}</small></label>`).join("")}</div></section><section class="panel-card"><div class="panel-heading"><div><h3>Pilihan kedua</h3><p>Tambahkan alternatif program studi.</p></div></div><div class="form-field"><select name="secondChoice">${state.programs.map((p) => `<option ${a.secondChoice === p.name ? "selected" : ""}>${escapeHTML(p.name)}</option>`).join("")}</select></div></section><section class="panel-card"><div class="panel-heading"><div><h3>Jalur pendaftaran</h3><p>Pilih jalur seleksi yang ingin kamu ikuti.</p></div></div><div class="choice-cards">${["Reguler", "Prestasi", "Beasiswa"].map((path) => `<label class="choice-card ${a.path === path ? "selected" : ""}"><input type="radio" name="path" value="${path}" ${a.path === path ? "checked" : ""}> <strong>Jalur ${path}</strong><small>${path === "Reguler" ? "Seleksi tes akademik" : path === "Prestasi" ? "Seleksi portofolio" : "Beasiswa pendidikan"}</small></label>`).join("")}</div><div class="form-actions"><button class="button button-primary">Simpan pilihan <span>→</span></button></div></section></form>`;
   if (page === "documents") return `${pageHeading("Unggah berkas", "Unggah dokumen persyaratan dengan format PDF, JPG, atau PNG.")}<section class="panel-card"><div class="panel-heading"><div><h3>Dokumen persyaratan</h3><p>Ukuran maksimal 5 MB untuk setiap berkas.</p></div>${progressMarkup(Math.min(100, Object.keys(a.documents).length * 25), "Kelengkapan berkas")}</div><div class="upload-grid">${[["ijazah", "Ijazah / surat keterangan lulus"], ["identitas", "Kartu identitas (KTP / KK)"], ["pasfoto", "Pas foto terbaru"], ["rapor", "Rapor semester 1–5"]].map(([key, title]) => `<label class="upload-card"><span class="upload-symbol">⇧</span><span><strong>${title}</strong><small>${a.documents[key] ? escapeHTML(a.documents[key]) : "Belum ada berkas · PDF / JPG / PNG"}</small></span><span class="upload-action">${a.documents[key] ? "Ganti" : "Pilih file"}<input type="file" data-document="${key}" accept=".pdf,.jpg,.jpeg,.png"></span></label>`).join("")}</div><div class="form-actions"><button class="button button-outline" data-page="overview">Kembali</button><button class="button button-primary" data-action="submitDocuments">Kirim untuk verifikasi <span>→</span></button></div></section><div class="alert-box">Berkas yang diunggah disimpan sebagai nama file pada perangkat ini untuk keperluan demo.</div>`;
   if (page === "verification") return `${pageHeading("Hasil verifikasi berkas", "Pantau status pemeriksaan dokumen pendaftaranmu.")}<section class="panel-card"><div class="panel-heading"><div><h3>Status dokumen</h3><p>Nomor pendaftaran ${escapeHTML(a.registrationNumber)}</p></div>${statusBadge(a.verification)}</div>${[["Ijazah / surat keterangan lulus", "ijazah"], ["Kartu identitas", "identitas"], ["Pas foto", "pasfoto"], ["Rapor semester 1–5", "rapor"]].map(([title, key]) => `<div class="status-step"><span class="step-dot ${a.documents[key] ? "" : "pending"}">${a.documents[key] ? "✓" : "·"}</span><div style="flex:1"><strong>${title}</strong><small>${a.documents[key] ? escapeHTML(a.documents[key]) : "Belum diunggah"}</small></div>${statusBadge(a.documents[key] ? a.verification : "Belum diunggah")}</div>`).join("")}</section><div class="alert-box">Jika berkas perlu diperbaiki, unggah kembali dokumen dengan kualitas gambar yang jelas.</div>`;
@@ -180,7 +305,7 @@ const adminSections = {
   },
   applicants: () => `${pageHeading("Data pendaftar", "Kelola dan pantau seluruh data calon mahasiswa.")}<section class="panel-card"><div class="search-row"><input class="search-input" id="applicantSearch" placeholder="Cari nama atau nomor pendaftaran"><select class="select-small" id="statusFilter"><option value="">Semua status</option><option>Menunggu verifikasi</option><option>Terverifikasi</option><option>Perlu perbaikan</option></select><button class="button button-outline" data-action="exportApplicants">Ekspor CSV ↓</button></div><div id="applicantTable">${renderApplicantTable(state.applicants, true)}</div></section>`,
   "verification-admin": () => `${pageHeading("Pemeriksaan berkas", "Tinjau dan perbarui status verifikasi calon mahasiswa.")}<section class="panel-card"><div class="panel-heading"><div><h3>Antrian verifikasi</h3><p>${state.applicants.filter((a) => a.status !== "Terverifikasi").length} pendaftar menunggu pemeriksaan</p></div><select class="select-small" id="verificationFilter"><option value="">Semua status</option><option>Menunggu verifikasi</option><option>Perlu perbaikan</option><option>Terverifikasi</option></select></div><div id="applicantTable">${renderApplicantTable(state.applicants, true, true)}</div></section>`,
-  "results-admin": () => `${pageHeading("Hasil seleksi", "Kelola dan umumkan hasil seleksi calon mahasiswa.")}<section class="panel-card"><div class="panel-heading"><div><h3>Kelulusan pendaftar</h3><p>Hasil dapat diperbarui setelah proses seleksi selesai.</p></div></div><div class="alert-box">Catatan: pembaruan hasil di sini hanya untuk simulasi demo.</div>${renderResultsTable()}</section>`,
+  "results-admin": () => `${pageHeading("Hasil seleksi", "Kelola dan umumkan hasil seleksi calon mahasiswa.")}<section class="panel-card"><div class="panel-heading"><div><h3>Kelulusan pendaftar</h3><p>Hasil dapat diperbarui setelah proses seleksi selesai.</p></div></div><div class="alert-box">Catatan: pembaruan hasil seleksi tersimpan ke database jika Supabase aktif.</div>${renderResultsTable()}</section>`,
   "programs-admin": () => `${pageHeading("Program studi", "Kelola daftar program studi dan kuota penerimaan.", `<button class="button button-primary" data-action="addProgram">＋ Tambah program</button>`)}<section class="panel-card">${renderProgramsTable()}</section>`,
   "routes-admin": () => `${pageHeading("Jalur pendaftaran", "Atur pilihan jalur seleksi untuk calon mahasiswa.")}<section class="panel-card">${state.routes.map((route) => `<div class="announcement-row"><div><strong>${escapeHTML(route.name)}</strong><p>${escapeHTML(route.description)}</p>${statusBadge(route.status)}</div><button class="table-action" data-action="editRoute" data-name="${escapeHTML(route.name)}">Edit</button></div>`).join("")}</section>`,
   "schedule-admin": () => `${pageHeading("Jadwal penerimaan", "Kelola tahapan dan tanggal penting penerimaan.", `<button class="button button-primary" data-action="addSchedule">＋ Tambah jadwal</button>`)}<section class="panel-card">${renderScheduleTable()}</section>`,
@@ -203,54 +328,124 @@ function renderScheduleTable() {
 
 function openModal(title, description, fields, submitLabel, onSubmit) {
   $("#modalRoot").innerHTML = `<div class="modal-backdrop"><form class="modal" id="modalForm"><div class="modal-top"><h2>${title}</h2><button type="button" class="modal-close" data-action="closeModal">×</button></div><p>${description}</p>${fields}<button class="button button-primary">${submitLabel}</button></form></div>`;
-  $("#modalForm").addEventListener("submit", (event) => {
+  $("#modalForm").addEventListener("submit", async (event) => {
     event.preventDefault();
     const data = Object.fromEntries(new FormData(event.currentTarget).entries());
-    onSubmit(data);
+    await onSubmit(data);
     $("#modalRoot").innerHTML = "";
   });
 }
 
-function loginModal(register = false) {
-  const fields = `${register ? '<div class="form-field"><label>Nama lengkap</label><input name="name" required placeholder="Nama sesuai identitas"></div>' : ""}<div class="form-field"><label>Alamat email</label><input name="email" type="email" required placeholder="nama@email.com"></div><div class="form-field"><label>Kata sandi</label><input name="password" type="password" required placeholder="Masukkan kata sandi"></div><div class="form-field"><label>Masuk sebagai</label><select name="role"><option value="applicant">Calon mahasiswa</option><option value="admin">Panitia / Admin</option></select></div>`;
-  openModal(register ? "Buat akun PMB" : "Selamat datang kembali", register ? "Daftar dan mulai langkah pertamamu bersama Cakrawala." : "Masuk untuk melanjutkan proses pendaftaran.", fields, register ? "Buat akun & lanjutkan →" : "Masuk ke portal →", (data) => {
-    state.role = data.role;
-    if (register && data.role === "applicant") {
-      const nextId = state.applicants.reduce((highest, applicant) => Math.max(highest, Number(applicant.number.split("-").pop()) || 0), 0) + 1;
-      state.applicant = {
-        ...structuredClone(initialState.applicant),
-        name: data.name,
-        email: data.email,
-        phone: "",
-        birthPlace: "",
-        birthDate: "",
-        address: "",
-        school: "",
-        registrationNumber: `PMB26-${String(nextId).padStart(4, "0")}`,
-        studyChoice: state.programs[0]?.name || "",
-        secondChoice: state.programs[1]?.name || "",
-        path: state.routes[0]?.name || "Reguler",
-        documents: {},
-        verification: "Menunggu verifikasi",
-        result: "Belum diumumkan"
-      };
-      state.applicants.push({ number: state.applicant.registrationNumber, name: state.applicant.name, study: state.applicant.studyChoice, path: state.applicant.path, status: state.applicant.verification, result: state.applicant.result });
+function loginModal(register = false, defaultRole = state.role || "applicant") {
+  syncUrlForRole(defaultRole);
+  const dbModeText = supabaseClient ? "Supabase terhubung" : "Mode lokal (isi SUPABASE_CONFIG di app.js untuk database)";
+  const roleHintBox = `
+    <div class="alert-box" style="margin-top:12px">
+      <strong>Petunjuk Akses &amp; Kredensial Role (${escapeHTML(dbModeText)}):</strong><br>
+      • <strong>URL Admin:</strong> <code>/admin</code> — pilih <em>Panitia / Admin</em> · email: <code>admin@cakrawala.ac.id</code> · sandi: <code>admin123</code><br>
+      • <strong>URL User:</strong> <code>/login</code> — pilih <em>Calon mahasiswa</em> · masuk dengan email akun atau klik <strong>Daftar sekarang</strong> untuk membuat akun &amp; data pribadi baru.
+    </div>
+  `;
+  const fields = `${register ? '<div class="form-field"><label>Nama lengkap</label><input name="name" required placeholder="Nama sesuai identitas"></div>' : ""}<div class="form-field"><label>Alamat email</label><input name="email" type="email" required placeholder="nama@email.com"></div><div class="form-field"><label>Kata sandi</label><input name="password" type="password" required placeholder="Masukkan kata sandi"></div><div class="form-field"><label>Masuk sebagai</label><select name="role"><option value="applicant" ${defaultRole === "applicant" ? "selected" : ""}>Calon mahasiswa</option><option value="admin" ${defaultRole === "admin" ? "selected" : ""}>Panitia / Admin</option></select></div>${roleHintBox}`;
+
+  openModal(
+    register ? "Buat akun PMB" : "Selamat datang kembali",
+    register ? "Daftar dan mulai langkah pertamamu bersama Cakrawala." : "Masuk untuk melanjutkan proses pendaftaran.",
+    fields,
+    register ? "Buat akun & lanjutkan →" : "Masuk ke portal →",
+    async (data) => {
+      state.role = data.role;
+      syncUrlForRole(state.role);
+
+      let authUserId = null;
+      if (supabaseClient) {
+        if (register) {
+          const { data: signUpData, error: signUpError } = await supabaseClient.auth.signUp({
+            email: data.email,
+            password: data.password,
+            options: { data: { full_name: data.name || "", role: data.role } }
+          });
+          if (signUpError && !/already registered/i.test(signUpError.message)) {
+            toast(`Auth info: ${signUpError.message}`);
+          }
+          authUserId = signUpData?.user?.id || null;
+        } else {
+          const { data: signInData, error: signInError } = await supabaseClient.auth.signInWithPassword({
+            email: data.email,
+            password: data.password
+          });
+          if (!signInError) {
+            authUserId = signInData?.user?.id || null;
+          }
+        }
+      }
+
+      if (register && data.role === "applicant") {
+        const nextId = state.applicants.reduce((highest, applicant) => Math.max(highest, Number(applicant.number.split("-").pop()) || 0), 0) + 1;
+        state.applicant = {
+          ...structuredClone(initialState.applicant),
+          id: null,
+          name: data.name,
+          email: data.email,
+          phone: "",
+          birthPlace: "",
+          birthDate: "",
+          address: "",
+          school: "",
+          registrationNumber: `PMB26-${String(nextId).padStart(4, "0")}`,
+          studyChoice: state.programs[0]?.name || "",
+          secondChoice: state.programs[1]?.name || "",
+          path: state.routes[0]?.name || "Reguler",
+          documents: {},
+          verification: "Menunggu verifikasi",
+          result: "Belum diumumkan"
+        };
+        state.applicants.push({
+          number: state.applicant.registrationNumber,
+          name: state.applicant.name,
+          study: state.applicant.studyChoice,
+          path: state.applicant.path,
+          status: state.applicant.verification,
+          result: state.applicant.result
+        });
+        await upsertProfileToSupabase(state.applicant, "applicant", authUserId);
+      } else if (data.role === "applicant" && data.email) {
+        if (supabaseClient) {
+          const { data: existingRow } = await supabaseClient
+            .from("profiles")
+            .select("*")
+            .ilike("email", data.email)
+            .maybeSingle();
+
+          if (existingRow) {
+            state.applicant = mapRowToApplicant(existingRow);
+          } else {
+            state.applicant.email = data.email;
+          }
+        } else {
+          state.applicant.email = data.email;
+        }
+      }
+
+      save();
+      showPage(data.role === "admin" ? "admin-overview" : "overview");
+      toast(register ? `Akun berhasil dibuat. Nomor pendaftaran ${state.applicant.registrationNumber}.` : "Berhasil masuk ke portal PMB.");
     }
-    if (data.role === "applicant" && data.email) state.applicant.email = data.email;
-    save();
-    showPage(data.role === "admin" ? "admin-overview" : "overview");
-    toast(register ? `Akun berhasil dibuat. Nomor pendaftaran ${state.applicant.registrationNumber}.` : "Berhasil masuk ke portal PMB.");
-  });
+  );
 }
 
 function handleAction(button) {
   const { action, number, index, name } = button.dataset;
-  if (action === "home") showPage("home");
-  if (action === "login") loginModal(false);
-  if (action === "register") loginModal(true);
+  if (action === "home") {
+    syncUrlForHome();
+    showPage("home");
+  }
+  if (action === "login") loginModal(false, state.role || "applicant");
+  if (action === "register") loginModal(true, "applicant");
   if (action === "closeModal") $("#modalRoot").innerHTML = "";
   if (action === "switchRole") {
     state.role = state.role === "admin" ? "applicant" : "admin";
+    syncUrlForRole(state.role);
     showPage(state.role === "admin" ? "admin-overview" : "overview");
   }
   if (action === "submitDocuments") {
@@ -258,15 +453,17 @@ function handleAction(button) {
     state.applicant.verification = "Menunggu verifikasi";
     const own = state.applicants.find((a) => a.number === state.applicant.registrationNumber);
     if (own) own.status = state.applicant.verification;
+    updateApplicantFieldsInSupabase(state.applicant.registrationNumber, { verification: state.applicant.verification });
     save(); renderDashboard(); toast("Berkas berhasil dikirim untuk verifikasi.");
   }
   if (action === "printProof") window.print();
   if (action === "reviewApplicant" || action === "editApplicant") {
     const applicant = state.applicants.find((item) => item.number === number);
     if (!applicant) return;
-    openModal(action === "reviewApplicant" ? "Tinjau berkas pendaftar" : "Detail pendaftar", `${applicant.number} · ${applicant.name}`, `<div class="form-field"><label>Status verifikasi</label><select name="status"><option ${applicant.status === "Menunggu verifikasi" ? "selected" : ""}>Menunggu verifikasi</option><option ${applicant.status === "Terverifikasi" ? "selected" : ""}>Terverifikasi</option><option ${applicant.status === "Perlu perbaikan" ? "selected" : ""}>Perlu perbaikan</option></select></div><div class="form-field"><label>Program studi</label><input value="${escapeHTML(applicant.study)}" disabled></div>`, "Simpan status", (data) => {
+    openModal(action === "reviewApplicant" ? "Tinjau berkas pendaftar" : "Detail pendaftar", `${applicant.number} · ${applicant.name}`, `<div class="form-field"><label>Status verifikasi</label><select name="status"><option ${applicant.status === "Menunggu verifikasi" ? "selected" : ""}>Menunggu verifikasi</option><option ${applicant.status === "Terverifikasi" ? "selected" : ""}>Terverifikasi</option><option ${applicant.status === "Perlu perbaikan" ? "selected" : ""}>Perlu perbaikan</option></select></div><div class="form-field"><label>Program studi</label><input value="${escapeHTML(applicant.study)}" disabled></div>`, "Simpan status", async (data) => {
       applicant.status = data.status;
       if (number === state.applicant.registrationNumber) state.applicant.verification = data.status;
+      await updateApplicantFieldsInSupabase(applicant.number, { verification: data.status });
       save(); renderDashboard(); toast("Status pendaftar berhasil diperbarui.");
     });
   }
@@ -309,20 +506,82 @@ document.addEventListener("click", (event) => {
   if (pageControl) {
     event.preventDefault();
     const page = pageControl.dataset.page;
-    if (page === "home") return showPage("home");
+    if (page === "home") {
+      syncUrlForHome();
+      return showPage("home");
+    }
     if (page === "overview" || page === "biodata" || page === "choices" || page === "documents" || page === "verification" || page === "result" || page === "proof" || page === "admin-overview" || page === "applicants" || page.endsWith("-admin")) return showPage(page);
   }
   if (actionControl) handleAction(actionControl);
   if (event.target.classList.contains("modal-backdrop")) $("#modalRoot").innerHTML = "";
 });
 
-document.addEventListener("submit", (event) => {
+document.addEventListener("change", async (event) => {
+  if (event.target.matches('#modalForm select[name="role"]')) {
+    syncUrlForRole(event.target.value);
+  }
+  if (event.target.matches("[data-document]")) {
+    const file = event.target.files[0];
+    if (!file) return;
+    if (file.size > 5 * 1024 * 1024) {
+      toast("Ukuran file maksimal 5 MB.");
+      event.target.value = "";
+      return;
+    }
+
+    const docType = event.target.dataset.document;
+    const regNumber = state.applicant.registrationNumber || "pendaftar";
+    toast(`Mengunggah ${file.name} ke R2...`);
+
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      formData.append("doc_type", docType);
+      formData.append("registration_number", regNumber);
+
+      const response = await fetch("/api/upload-dokumen", {
+        method: "POST",
+        body: formData
+      });
+      const result = await response.json();
+
+      if (!response.ok || !result.ok) {
+        throw new Error(result.error || "Gagal mengunggah dokumen.");
+      }
+
+      state.applicant.documents[docType] = result.url;
+      save();
+      renderDashboard();
+      toast(`${file.name} berhasil diunggah ke R2.`);
+    } catch (err) {
+      event.target.value = "";
+      toast(err.message || "Terjadi kesalahan saat mengunggah dokumen.");
+    }
+  }
+  if (event.target.matches(".result-select")) {
+    const applicant = state.applicants.find((a) => a.number === event.target.dataset.number);
+    if (applicant) {
+      applicant.result = event.target.value;
+      if (applicant.number === state.applicant.registrationNumber) state.applicant.result = event.target.value;
+      await updateApplicantFieldsInSupabase(applicant.number, { result: event.target.value });
+      save(); renderDashboard(); toast("Hasil seleksi berhasil diperbarui.");
+    }
+  }
+  if (event.target.id === "statusFilter" || event.target.id === "verificationFilter") filterApplicants();
+  if (event.target.matches('input[name="studyChoice"],input[name="path"]')) event.target.closest(".choice-card").parentElement.querySelectorAll(".choice-card").forEach((card) => card.classList.toggle("selected", card.contains(event.target)));
+});
+
+document.addEventListener("submit", async (event) => {
   if (event.target.id === "biodataForm") {
     event.preventDefault();
     Object.assign(state.applicant, Object.fromEntries(new FormData(event.target).entries()));
     const ownApplicant = state.applicants.find((a) => a.number === state.applicant.registrationNumber);
     if (ownApplicant) ownApplicant.name = state.applicant.name;
-    save(); renderDashboard(); toast("Biodata berhasil disimpan.");
+
+    const dbResult = await upsertProfileToSupabase(state.applicant, "applicant");
+    save();
+    renderDashboard();
+    toast(dbResult && !dbResult.error ? "Biodata & data pribadi tersimpan ke Supabase." : "Biodata tersimpan secara lokal.");
   }
   if (event.target.id === "choicesForm") {
     event.preventDefault();
@@ -332,29 +591,16 @@ document.addEventListener("submit", (event) => {
     state.applicant.path = data.get("path") || state.applicant.path;
     const own = state.applicants.find((a) => a.number === state.applicant.registrationNumber);
     if (own) { own.study = state.applicant.studyChoice; own.path = state.applicant.path; }
+
+    await updateApplicantFieldsInSupabase(state.applicant.registrationNumber, {
+      study_choice: state.applicant.studyChoice,
+      second_choice: state.applicant.secondChoice,
+      path: state.applicant.path
+    });
     save(); renderDashboard(); toast("Pilihan program studi berhasil disimpan.");
   }
 });
 
-document.addEventListener("change", (event) => {
-  if (event.target.matches("[data-document]")) {
-    const file = event.target.files[0];
-    if (!file) return;
-    if (file.size > 5 * 1024 * 1024) { toast("Ukuran file maksimal 5 MB."); event.target.value = ""; return; }
-    state.applicant.documents[event.target.dataset.document] = file.name;
-    save(); renderDashboard(); toast(`${file.name} berhasil dipilih.`);
-  }
-  if (event.target.matches(".result-select")) {
-    const applicant = state.applicants.find((a) => a.number === event.target.dataset.number);
-    if (applicant) {
-      applicant.result = event.target.value;
-      if (applicant.number === state.applicant.registrationNumber) state.applicant.result = event.target.value;
-      save(); renderDashboard(); toast("Hasil seleksi berhasil diperbarui.");
-    }
-  }
-  if (event.target.id === "statusFilter" || event.target.id === "verificationFilter") filterApplicants();
-  if (event.target.matches('input[name="studyChoice"],input[name="path"]')) event.target.closest(".choice-card").parentElement.querySelectorAll(".choice-card").forEach((card) => card.classList.toggle("selected", card.contains(event.target)));
-});
 document.addEventListener("input", (event) => { if (event.target.id === "applicantSearch") filterApplicants(); });
 function filterApplicants() {
   if (!["applicants", "verification-admin"].includes(state.activePage)) return;
@@ -364,7 +610,22 @@ function filterApplicants() {
   $("#applicantTable") && ($("#applicantTable").innerHTML = renderApplicantTable(rows, true));
   if (state.activePage === "verification-admin") $("#applicantTable").innerHTML = renderApplicantTable(rows, true, true);
 }
+
+async function applyRouteFromUrl() {
+  const cleanPath = window.location.pathname.replace(/\/+$/, "") || "/";
+  $("#modalRoot").innerHTML = "";
+  await syncProfilesFromSupabase();
+  renderPublic();
+  showPage("home");
+
+  if (cleanPath === "/admin") {
+    loginModal(false, "admin");
+  } else if (cleanPath === "/login") {
+    loginModal(false, "applicant");
+  }
+}
+
+window.addEventListener("popstate", applyRouteFromUrl);
 $("#mobileMenu").addEventListener("click", () => $("#mainNav").classList.toggle("open"));
 document.addEventListener("click", (event) => { if (event.target.closest("#mainNav a")) $("#mainNav").classList.remove("open"); });
-renderPublic();
-showPage("home");
+applyRouteFromUrl();
