@@ -1,8 +1,8 @@
 {
-  "name": "pmb-nusantara",
+  "name": "web-penerimaan-mahasiswa",
   "version": "1.0.0",
   "private": true,
-  "description": "Portal Penerimaan Mahasiswa Baru",
+  "description": "Web Penerimaan Mahasiswa Baru",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
