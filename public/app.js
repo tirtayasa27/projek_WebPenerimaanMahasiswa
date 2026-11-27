@@ -346,7 +346,25 @@ const pageTitles = {
 };
 
 function renderPublic() {
-  $("#publicPrograms").innerHTML = state.programs.slice(0, 4).map((program) => `<article class="program-card"><span class="program-icon">${escapeHTML(program.icon || "◇")}</span><h3>${escapeHTML(program.name)}</h3><p>${escapeHTML(program.description || program.faculty)}</p><div class="program-meta"><span>${escapeHTML(program.faculty)}</span><b>Kuota ${escapeHTML(program.quota)}</b></div></article>`).join("");
+  $("#publicPrograms").innerHTML = state.programs.map((program) => `<article class="program-card"><span class="program-icon">${escapeHTML(program.icon || "◇")}</span><h3>${escapeHTML(program.name)}</h3><p>${escapeHTML(program.description || program.faculty)}</p><div class="program-meta"><span>${escapeHTML(program.faculty)}</span><b>Kuota ${escapeHTML(program.quota)}</b></div></article>`).join("");
+  const facultyCount = new Set(state.programs.map((program) => program.faculty).filter(Boolean)).size;
+  $("#aboutStats").innerHTML = [
+    [state.programs.length, "Program studi"],
+    [facultyCount, "Fakultas"],
+    [state.routes.length, "Jalur penerimaan"],
+    ["120+", "Dosen"]
+  ].map(([value, label]) => `<article class="about-stat"><strong>${escapeHTML(value)}</strong><span>${escapeHTML(label)}</span></article>`).join("");
+  const accreditationRatings = {
+    Informatika: "Baik Sekali",
+    Manajemen: "Baik",
+    Psikologi: "Baik Sekali",
+    "Ilmu Komunikasi": "Baik",
+    "Sistem Informasi": "Baik Sekali",
+    Akuntansi: "Baik",
+    "Desain Komunikasi Visual": "Baik",
+    "Teknik Industri": "Baik Sekali"
+  };
+  $("#aboutAccreditations").innerHTML = `<article class="accreditation-card"><div><strong>Akreditasi institusi</strong><small>Universitas Cakrawala Nusantara</small></div><span>A</span></article>${state.programs.map((program) => `<article class="accreditation-card"><div><strong>${escapeHTML(program.name)}</strong><small>${escapeHTML(program.faculty || "Program studi")}</small></div><span>${escapeHTML(program.accreditation || accreditationRatings[program.name] || "Perlu diperbarui")}</span></article>`).join("")}`;
   $("#publicSchedules").innerHTML = state.schedules.map((schedule) => `<div><span class="schedule-date">${escapeHTML(schedule.date)}</span><strong>${escapeHTML(schedule.title)}</strong><span class="schedule-status ${schedule.status === "Dibuka" ? "" : "muted"}">${escapeHTML(schedule.status.toUpperCase())}</span></div>`).join("");
   $("#publicPaths").innerHTML = state.routes.map((route, index) => `<article class="path-card"><span>0${index + 1}</span><h3>Jalur ${escapeHTML(route.name)}</h3><p>${escapeHTML(route.description)}</p><small>${escapeHTML(route.status.toUpperCase())}</small></article>`).join("");
   $("#publicAnnouncements").innerHTML = state.announcements.slice(0, 3).map((item) => `<article class="announcement-card"><small>${escapeHTML(item.date)}</small><h3>${escapeHTML(item.title)}</h3><p>${escapeHTML(item.body)}</p></article>`).join("");
@@ -378,8 +396,10 @@ function showPublicPage(sectionId = null) {
 
 function renderDashboard() {
   const admin = state.role === "admin";
+  const displayName = admin ? "Admin PMB" : state.applicant.name || "Guest";
   $("#sideLabel").textContent = admin ? "AREA PANITIA" : "AREA PENDAFTAR";
-  $("#sidebarName").textContent = admin ? "Admin PMB" : state.applicant.name;
+  $("#sidebarName").textContent = displayName;
+  $("#sidebarAvatar").textContent = displayName.trim().charAt(0).toLocaleUpperCase("id-ID") || "G";
   $("#sidebarRole").textContent = admin ? "Panitia penerimaan" : "Calon mahasiswa";
   $("#currentSection").textContent = pageTitles[state.activePage] || "Ringkasan";
   $("#dashboardNav").innerHTML = navConfig[state.role].map((group) => `<div class="nav-group-label">${group.group}</div>${group.items.map(([id, icon, label]) => `<button class="${state.activePage === id ? "active" : ""}" data-page="${id}"><span class="nav-icon">${icon}</span>${label}</button>`).join("")}`).join("");
@@ -393,7 +413,7 @@ function statCard(label, value, note) {
   return `<article class="stat-card"><span>${label}</span><strong>${value}</strong><small>${note}</small></article>`;
 }
 function statusBadge(value) {
-  const klass = /Terverifikasi|Lulus|Diterima|Dibuka|Aktif/i.test(value) ? "success" : /Perlu perbaikan|Tidak lulus|Ditolak/i.test(value) ? "danger" : "warning";
+  const klass = /Terverifikasi|Terkirim|Tersimpan|Lulus|Diterima|Dibuka|Aktif/i.test(value) ? "success" : /Perlu perbaikan|Tidak lulus|Ditolak/i.test(value) ? "danger" : "warning";
   return `<span class="status-badge ${klass}">${escapeHTML(value)}</span>`;
 }
 function progressMarkup(percent, label = "Progres pendaftaran") {
@@ -406,22 +426,119 @@ function greetingName(email, fallbackName) {
   if (!nameParts.length) return fallbackName.split(/\s+/)[0] || "Mahasiswa";
   return nameParts.map((part) => part.charAt(0).toLocaleUpperCase("id-ID") + part.slice(1).toLocaleLowerCase("id-ID")).join(" ");
 }
-function stepsMarkup() {
-  const current = state.applicant.documents && Object.keys(state.applicant.documents).length ? 3 : 2;
-  const verificationDetail = state.applicant.reviewNote
-    ? `${state.applicant.verification} — Catatan: ${state.applicant.reviewNote}`
-    : state.applicant.verification;
-  return [["Buat akun pendaftaran", "Akun berhasil dibuat"], ["Lengkapi biodata", "Pastikan data diri sudah benar"], ["Unggah berkas persyaratan", "Unggah dokumen yang diminta"], ["Verifikasi berkas", verificationDetail], ["Pengumuman hasil seleksi", state.applicant.result]].map(([title, detail], index) => `<div class="status-step"><span class="step-dot ${index < current ? "" : "pending"}">${index < current ? "✓" : index + 1}</span><div><strong>${title}</strong><small>${escapeHTML(detail)}</small></div></div>`).join("");
+function applicantJourney() {
+  const applicant = state.applicant;
+  const biodataComplete = ["name", "email", "phone", "gender"].every((key) => String(applicant[key] || "").trim());
+  const choicesComplete = ["studyChoice", "secondChoice", "path"].every((key) => String(applicant[key] || "").trim());
+  const requiredDocuments = ["ijazah", "identitas", "pasfoto", "rapor"];
+  const missingDocuments = requiredDocuments.filter((key) => !applicant.documents?.[key]);
+  const documentsComplete = missingDocuments.length === 0;
+  const needsRevision = applicant.verification === "Perlu perbaikan";
+  const submitted = ["Diajukan", "Menunggu verifikasi", "Perlu perbaikan", "Terverifikasi"].includes(applicant.verification);
+  const verified = applicant.verification === "Terverifikasi";
+  const resultAnnounced = Boolean(applicant.result && applicant.result !== "Belum diumumkan");
+
+  let nextPage = "result";
+  let nextLabel = "Pantau hasil seleksi";
+  if (!biodataComplete) {
+    nextPage = "biodata";
+    nextLabel = "Lengkapi biodata";
+  } else if (!choicesComplete) {
+    nextPage = "choices";
+    nextLabel = "Pilih program dan jalur";
+  } else if (needsRevision || !documentsComplete || !submitted) {
+    nextPage = "documents";
+    nextLabel = needsRevision ? "Perbaiki berkas" : documentsComplete ? "Kirim berkas untuk verifikasi" : "Lengkapi berkas";
+  } else if (!verified) {
+    nextPage = "verification";
+    nextLabel = "Lihat status verifikasi";
+  } else if (resultAnnounced) {
+    nextLabel = "Lihat hasil seleksi";
+  }
+
+  const steps = [
+    { title: "Buat akun", detail: "Akun pendaftaran berhasil dibuat.", page: "overview", complete: true },
+    { title: "Lengkapi biodata", detail: biodataComplete ? "Data wajib sudah dilengkapi." : "Isi nama, email, nomor telepon, dan jenis kelamin.", page: "biodata", complete: biodataComplete },
+    { title: "Pilih program dan jalur", detail: choicesComplete ? `${applicant.studyChoice} · Jalur ${applicant.path}` : "Tentukan program studi dan jalur pendaftaran.", page: "choices", complete: choicesComplete },
+    {
+      title: "Unggah dan kirim berkas",
+      detail: needsRevision
+        ? `Berkas perlu diperbaiki. ${applicant.reviewNote || "Periksa catatan panitia."}`
+        : documentsComplete
+          ? submitted ? "Berkas sudah dikirim ke panitia." : "Berkas lengkap. Lanjutkan dengan mengirimnya."
+          : `Masih perlu mengunggah: ${missingDocuments.join(", ")}.`,
+      page: "documents",
+      complete: documentsComplete && submitted && !needsRevision
+    },
+    {
+      title: "Verifikasi panitia",
+      detail: verified ? "Berkas sudah terverifikasi." : submitted && !needsRevision ? "Berkas diterima dan menunggu pemeriksaan panitia." : "Dimulai setelah berkas dikirim.",
+      page: "verification",
+      complete: verified
+    },
+    {
+      title: "Lihat hasil seleksi",
+      detail: resultAnnounced ? `Hasil seleksi: ${applicant.result}.` : "Hasil akan ditampilkan setelah diumumkan panitia.",
+      page: "result",
+      complete: resultAnnounced
+    }
+  ];
+
+  return { steps, nextPage, nextLabel, completedCount: steps.filter((step) => step.complete).length };
+}
+
+function journeyMarkup(journey) {
+  const percent = Math.round((journey.completedCount / journey.steps.length) * 100);
+  return `<section class="panel-card journey-card" aria-labelledby="journeyTitle"><div class="panel-heading"><div><h3 id="journeyTitle">Alur pendaftaranmu</h3><p>Ikuti langkah berikut secara berurutan sampai hasil seleksi diumumkan.</p></div><span class="journey-count">${journey.completedCount} dari ${journey.steps.length} selesai</span></div>${progressMarkup(percent, "Progres pendaftaran")}<div class="journey-steps">${journey.steps.map((step, index) => {
+    const current = step.page === journey.nextPage;
+    const status = step.complete ? "Selesai" : current ? "Langkah berikutnya" : "Menunggu";
+    return `<button type="button" class="journey-step${step.complete ? " complete" : ""}${current ? " current" : ""}" data-page="${step.page}" aria-current="${current ? "step" : "false"}"><span class="journey-number">${step.complete ? "✓" : index + 1}</span><span class="journey-copy"><strong>${step.title}</strong><small>${escapeHTML(step.detail)}</small></span><span class="journey-status">${status}</span></button>`;
+  }).join("")}</div></section>`;
 }
 
 function renderApplicantPage(page) {
   const a = state.applicant;
-  if (page === "overview") return `${pageHeading("Halo, " + escapeHTML(greetingName(a.email, a.name)) + " 👋", "Pantau perjalanan pendaftaranmu di sini.")}<div class="welcome-banner"><div><span>PENDAFTARAN TAHUN AKADEMIK 2026/2027</span><h2>${escapeHTML(a.registrationNumber)}</h2><p>${escapeHTML(a.studyChoice)} · Jalur ${escapeHTML(a.path)}</p></div><button class="button button-gold" data-page="proof">Lihat bukti <span>↗</span></button></div><div class="stat-grid">${statCard("Status pendaftaran", escapeHTML(a.verification), "● Status pemeriksaan berkas")}${statCard("Nomor pendaftaran", escapeHTML(a.registrationNumber), "Nomor identitas PMB")}${statCard("Pilihan program studi", escapeHTML(a.studyChoice), "Pilihan utama")}${statCard("Jalur pendaftaran", escapeHTML(a.path), "Tahun akademik 2026/27")}</div><div class="dashboard-columns"><section class="panel-card"><div class="panel-heading"><h3>Progres pendaftaran</h3><button class="plain-link" data-page="documents">Lengkapi berkas →</button></div>${progressMarkup(a.verification === "Terverifikasi" ? 80 : 45)}${stepsMarkup()}</section><section class="panel-card"><div class="panel-heading"><h3>Informasi penting</h3></div><div class="alert-box"><strong>Jangan lupa melengkapi berkasmu.</strong><br>Pastikan semua dokumen terlihat jelas agar proses verifikasi lebih cepat.</div><div class="panel-heading" style="margin-top:20px"><h3>Pengumuman terbaru</h3></div>${state.announcements.slice(0, 2).map((n) => `<div class="announcement-row"><div><strong>${escapeHTML(n.title)}</strong><p>${escapeHTML(n.date)}</p></div></div>`).join("")}</section></div>`;
-  if (page === "biodata") return `${pageHeading("Biodata diri", "Lengkapi data diri dengan benar sesuai dokumen resmi.")}<form id="biodataForm" class="panel-card"><div class="panel-heading"><div><h3>Informasi pribadi</h3><p>Nama lengkap dan data pribadi tersimpan di database Supabase.</p></div></div><div class="field-grid">${field("Nama lengkap", "name", a.name, "text", true)}${field("Alamat email", "email", a.email, "email", true)}${field("Nomor telepon", "phone", a.phone, "tel", true)}${field("Jenis kelamin", "gender", a.gender, "select", true, ["Perempuan", "Laki-laki"])}${field("Tempat lahir", "birthPlace", a.birthPlace)}${field("Tanggal lahir", "birthDate", a.birthDate, "date")}${field("Asal sekolah", "school", a.school)}${field("Alamat domisili", "address", a.address)}</div><div class="form-actions"><button class="button button-primary">Simpan biodata <span>→</span></button></div></form>`;
-  if (page === "choices") return `${pageHeading("Pilihan program studi", "Tentukan program studi dan jalur yang paling sesuai.")}<form id="choicesForm"><section class="panel-card"><div class="panel-heading"><div><h3>Pilihan pertama</h3><p>Pilih program studi prioritasmu.</p></div></div><div class="choice-cards">${state.programs.map((p) => `<label class="choice-card ${a.studyChoice === p.name ? "selected" : ""}"><input type="radio" name="studyChoice" value="${escapeHTML(p.name)}" ${a.studyChoice === p.name ? "checked" : ""}> <strong>${escapeHTML(p.name)}</strong><small>${escapeHTML(p.faculty)}</small></label>`).join("")}</div></section><section class="panel-card"><div class="panel-heading"><div><h3>Pilihan kedua</h3><p>Tambahkan alternatif program studi.</p></div></div><div class="form-field"><select name="secondChoice">${state.programs.map((p) => `<option ${a.secondChoice === p.name ? "selected" : ""}>${escapeHTML(p.name)}</option>`).join("")}</select></div></section><section class="panel-card"><div class="panel-heading"><div><h3>Jalur pendaftaran</h3><p>Pilih jalur seleksi yang ingin kamu ikuti.</p></div></div><div class="choice-cards">${["Reguler", "Prestasi", "Beasiswa"].map((path) => `<label class="choice-card ${a.path === path ? "selected" : ""}"><input type="radio" name="path" value="${path}" ${a.path === path ? "checked" : ""}> <strong>Jalur ${path}</strong><small>${path === "Reguler" ? "Seleksi tes akademik" : path === "Prestasi" ? "Seleksi portofolio" : "Beasiswa pendidikan"}</small></label>`).join("")}</div><div class="form-actions"><button class="button button-primary">Simpan pilihan <span>→</span></button></div></section></form>`;
-  if (page === "documents") return `${pageHeading("Unggah berkas", "Unggah dokumen persyaratan dengan format PDF, JPG, PNG, atau WEBP.")}<section class="panel-card"><div class="panel-heading"><div><h3>Dokumen persyaratan</h3><p>Ukuran maksimal 5 MB untuk setiap berkas.</p></div>${progressMarkup(Math.min(100, Object.keys(a.documents).length * 25), "Kelengkapan berkas")}</div><div class="upload-grid">${[["ijazah", "Ijazah / surat keterangan lulus"], ["identitas", "Kartu identitas (KTP / KK)"], ["pasfoto", "Pas foto terbaru"], ["rapor", "Rapor semester 1–5"]].map(([key, title]) => `<label class="upload-card"><span class="upload-symbol">⇧</span><span><strong>${title}</strong><small>${a.documents[key] ? escapeHTML(a.documents[key]) : "Belum ada berkas · PDF / JPG / PNG / WEBP"}</small></span><span class="upload-action">${a.documents[key] ? "Ganti" : "Pilih file"}<input type="file" data-document="${key}" accept=".pdf,.jpg,.jpeg,.png,.webp"></span></label>`).join("")}</div><div class="form-actions"><button class="button button-outline" data-page="overview">Kembali</button><button class="button button-primary" data-action="submitDocuments">Kirim untuk verifikasi <span>→</span></button></div></section><div class="alert-box">Berkas diunggah ke penyimpanan Cloudflare R2 dan ditautkan ke pendaftaranmu.</div>`;
-  if (page === "verification") return `${pageHeading("Hasil verifikasi berkas", "Pantau status pemeriksaan dokumen pendaftaranmu.")}<section class="panel-card"><div class="panel-heading"><div><h3>Status dokumen</h3><p>Nomor pendaftaran ${escapeHTML(a.registrationNumber)}</p></div>${statusBadge(a.verification)}</div>${[["Ijazah / surat keterangan lulus", "ijazah"], ["Kartu identitas", "identitas"], ["Pas foto", "pasfoto"], ["Rapor semester 1–5", "rapor"]].map(([title, key]) => `<div class="status-step"><span class="step-dot ${a.documents[key] ? "" : "pending"}">${a.documents[key] ? "✓" : "·"}</span><div style="flex:1"><strong>${title}</strong><small>${a.documents[key] ? escapeHTML(a.documents[key]) : "Belum diunggah"}</small></div>${statusBadge(a.documents[key] ? a.verification : "Belum diunggah")}</div>`).join("")}</section><div class="alert-box">Jika berkas perlu diperbaiki, unggah kembali dokumen dengan kualitas gambar yang jelas.</div>`;
-  if (page === "result") return `${pageHeading("Hasil seleksi", "Informasi hasil seleksi penerimaan mahasiswa baru.")}<section class="panel-card"><div class="panel-heading"><div><h3>Pengumuman hasil seleksi</h3><p>Nomor pendaftaran ${escapeHTML(a.registrationNumber)}</p></div>${statusBadge(a.result)}</div><div class="welcome-banner"><div><span>PROGRAM STUDI PILIHAN</span><h2>${escapeHTML(a.studyChoice)}</h2><p>Jalur ${escapeHTML(a.path)} · Tahun akademik 2026/2027</p></div></div><p style="font-size:10px;color:#788392;line-height:1.7">Hasil seleksi akan ditampilkan di halaman ini setelah proses seleksi selesai pada 12 Juli 2026. Pastikan data dan dokumenmu sudah lengkap.</p></section>`;
+  if (page === "overview") {
+    const journey = applicantJourney();
+    return `${pageHeading("Halo, " + escapeHTML(greetingName(a.email, a.name)) + " 👋", "Pantau perjalanan pendaftaranmu di sini.")}<div class="welcome-banner welcome-journey"><div><span>PENDAFTARAN TAHUN AKADEMIK 2026/2027</span><h2>${escapeHTML(a.registrationNumber)}</h2><p>${escapeHTML(a.studyChoice)} · Jalur ${escapeHTML(a.path)}</p></div><div class="journey-actions"><button class="button button-gold" data-page="${journey.nextPage}">${journey.nextLabel} <span>→</span></button><button class="journey-proof" data-page="proof">Lihat bukti pendaftaran</button></div></div><div class="stat-grid">${statCard("Status pendaftaran", escapeHTML(a.verification), "Status pemeriksaan berkas")}${statCard("Nomor pendaftaran", escapeHTML(a.registrationNumber), "Nomor identitas PMB")}${statCard("Pilihan program studi", escapeHTML(a.studyChoice), "Pilihan utama")}${statCard("Jalur pendaftaran", escapeHTML(a.path), "Tahun akademik 2026/27")}</div>${journeyMarkup(journey)}<section class="panel-card"><div class="panel-heading"><div><h3>Informasi penting</h3><p>Pengumuman terbaru terkait penerimaan.</p></div></div>${state.announcements.slice(0, 2).map((n) => `<div class="announcement-row"><div><strong>${escapeHTML(n.title)}</strong><p>${escapeHTML(n.date)}</p></div></div>`).join("")}</section>`;
+  }
+  if (page === "biodata") return `${pageHeading("Langkah 1 — Biodata diri", "Isi data wajib, simpan, lalu lanjutkan ke pilihan program studi.")}<form id="biodataForm" class="panel-card"><div class="panel-heading"><div><h3>Informasi pribadi</h3><p>Kolom bertanda * wajib diisi sebelum melanjutkan.</p></div></div><div class="field-grid">${field("Nama lengkap", "name", a.name, "text", true)}${field("Alamat email", "email", a.email, "email", true)}${field("Nomor telepon", "phone", a.phone, "tel", true)}${field("Jenis kelamin", "gender", a.gender, "select", true, ["Perempuan", "Laki-laki"])}${field("Tempat lahir", "birthPlace", a.birthPlace)}${field("Tanggal lahir", "birthDate", a.birthDate, "date")}${field("Asal sekolah", "school", a.school)}${field("Alamat domisili", "address", a.address)}</div><div class="form-actions"><button class="button button-primary">Simpan & lanjutkan <span>→</span></button></div></form>`;
+  if (page === "choices") {
+    const programChoiceCards = (fieldName, selectedProgram) => state.programs.map((program) => (
+      `<label class="choice-card ${selectedProgram === program.name ? "selected" : ""}"><input type="radio" name="${fieldName}" value="${escapeHTML(program.name)}" required ${selectedProgram === program.name ? "checked" : ""}> <strong>${escapeHTML(program.name)}</strong><small>${escapeHTML(program.faculty)}</small></label>`
+    )).join("");
+    return `${pageHeading("Langkah 2 — Pilihan studi", "Pilih program utama, program alternatif, dan jalur pendaftaran.")}<form id="choicesForm"><section class="panel-card"><div class="panel-heading"><div><h3>Pilihan pertama</h3><p>Program studi prioritasmu.</p></div></div><div class="choice-cards">${programChoiceCards("studyChoice", a.studyChoice)}</div></section><section class="panel-card"><div class="panel-heading"><div><h3>Pilihan kedua</h3><p>Tambahkan program alternatif.</p></div></div><div class="choice-cards">${programChoiceCards("secondChoice", a.secondChoice)}</div></section><section class="panel-card"><div class="panel-heading"><div><h3>Jalur pendaftaran</h3><p>Pilih jalur seleksi yang ingin kamu ikuti.</p></div></div><div class="choice-cards">${["Reguler", "Prestasi", "Beasiswa"].map((path) => `<label class="choice-card ${a.path === path ? "selected" : ""}"><input type="radio" name="path" value="${path}" ${a.path === path ? "checked" : ""}> <strong>Jalur ${path}</strong><small>${path === "Reguler" ? "Seleksi tes akademik" : path === "Prestasi" ? "Seleksi portofolio" : "Beasiswa pendidikan"}</small></label>`).join("")}</div><div class="form-actions"><button class="button button-primary">Simpan & lanjutkan <span>→</span></button></div></section></form>`;
+  }
+  if (page === "documents") return `${pageHeading("Langkah 3 — Berkas pendaftaran", "Unggah semua dokumen, lalu kirim agar dapat diperiksa panitia.")}<section class="panel-card"><div class="panel-heading"><div><h3>Dokumen yang diperlukan</h3><p>Format PDF, JPG, PNG, atau WEBP · Maksimal 5 MB per file.</p></div>${progressMarkup(Math.min(100, Object.keys(a.documents).length * 25), "Kelengkapan berkas")}</div><div class="upload-grid">${[["ijazah", "Ijazah / surat keterangan lulus"], ["identitas", "Kartu identitas (KTP / KK)"], ["pasfoto", "Pas foto terbaru"], ["rapor", "Rapor semester 1–5"]].map(([key, title]) => `<label class="upload-card"><span class="upload-symbol">⇧</span><span><strong>${title}</strong><small>${a.documents[key] ? escapeHTML(a.documents[key]) : "Belum diunggah · PDF / JPG / PNG / WEBP"}</small></span><span class="upload-action">${a.documents[key] ? "Ganti berkas" : "Pilih berkas"}<input type="file" data-document="${key}" accept=".pdf,.jpg,.jpeg,.png,.webp"></span></label>`).join("")}</div><div class="form-actions"><button type="button" class="button button-outline" data-page="choices">Kembali ke pilihan</button><button class="button button-primary" data-action="submitDocuments">Kirim berkas ke panitia <span>→</span></button></div></section><div class="alert-box">Setelah dikirim, pantau status pemeriksaan di menu “Verifikasi berkas”. Jika ada revisi, catatan panitia akan muncul di sana.</div>`;
+  if (page === "verification") {
+    const revisionMessage = a.reviewNote ? `Catatan panitia: ${a.reviewNote}` : "Silakan perbaiki dokumen yang diminta lalu kirim kembali.";
+    const verificationMessage = a.verification === "Perlu perbaikan"
+      ? `${revisionMessage} Unggah dokumen yang diminta, lalu kirim ulang.`
+      : a.verification === "Terverifikasi"
+        ? "Panitia sudah memeriksa dan menyetujui berkasmu. Tahap verifikasi selesai."
+        : a.verification === "Diajukan" || a.verification === "Menunggu verifikasi"
+          ? "Pengiriman berkas selesai. Panitia sedang memeriksa dokumenmu; kamu tidak perlu mengirim ulang kecuali diminta revisi."
+          : "Berkas belum dikirim. Lengkapi semua dokumen, lalu pilih “Kirim berkas ke panitia”.";
+    const submissionComplete = ["Diajukan", "Menunggu verifikasi", "Terverifikasi"].includes(a.verification);
+    const documents = [["Ijazah / surat keterangan lulus", "ijazah"], ["Kartu identitas", "identitas"], ["Pas foto", "pasfoto"], ["Rapor semester 1–5", "rapor"]];
+    return `${pageHeading("Langkah 4 — Verifikasi berkas", "Status pemeriksaan dan catatan panitia ditampilkan di halaman ini.")}<section class="panel-card"><div class="panel-heading"><div><h3>Status pendaftaran</h3><p>Nomor pendaftaran ${escapeHTML(a.registrationNumber)}</p></div>${statusBadge(a.verification)}</div>${documents.map(([title, key]) => {
+      const documentStatus = !a.documents[key]
+        ? "Belum diunggah"
+        : a.verification === "Terverifikasi"
+          ? "Terverifikasi"
+          : ["Diajukan", "Menunggu verifikasi", "Perlu perbaikan"].includes(a.verification)
+            ? "Terkirim"
+            : "Tersimpan";
+      return `<div class="status-step"><span class="step-dot ${a.documents[key] ? "" : "pending"}">${a.documents[key] ? "✓" : "·"}</span><div style="flex:1"><strong>${title}</strong><small>${a.documents[key] ? escapeHTML(a.documents[key]) : "Belum diunggah"}</small></div>${statusBadge(documentStatus)}</div>`;
+    }).join("")}</section>${submissionComplete ? '<div class="submission-complete">✓ Pengiriman berkas selesai</div>' : ""}<div class="alert-box">${escapeHTML(verificationMessage)}${a.verification === "Perlu perbaikan" ? ' <button class="plain-link" data-page="documents">Perbaiki berkas →</button>' : ""}</div>`;
+  }
+  if (page === "result") {
+    const resultAnnounced = a.result && a.result !== "Belum diumumkan";
+    const resultMessage = resultAnnounced
+      ? "Hasil seleksi telah diumumkan. Silakan simpan informasi ini sebagai bukti."
+      : "Hasil seleksi belum diumumkan. Informasi akan tampil di halaman ini setelah panitia menetapkan hasil.";
+    return `${pageHeading("Hasil seleksi", "Periksa pengumuman hasil seleksi menggunakan nomor pendaftaranmu.")}<section class="panel-card"><div class="panel-heading"><div><h3>${resultAnnounced ? "Hasil seleksi tersedia" : "Menunggu pengumuman"}</h3><p>Nomor pendaftaran ${escapeHTML(a.registrationNumber)}</p></div>${statusBadge(a.result)}</div><div class="welcome-banner"><div><span>PROGRAM STUDI PILIHAN</span><h2>${escapeHTML(a.studyChoice)}</h2><p>Jalur ${escapeHTML(a.path)} · Tahun akademik 2026/2027</p></div></div><p class="result-message">${resultMessage}</p></section>`;
+  }
   if (page === "proof") return `${pageHeading("Bukti pendaftaran", "Ringkasan pendaftaranmu. Simpan bukti ini sebagai referensi.")}<section class="panel-card proof-card"><div class="panel-heading"><div><h3>UNIVERSITAS CAKRAWALA NUSANTARA</h3><p>BUKTI PENDAFTARAN MAHASISWA BARU 2026/2027</p></div><span class="brand-mark">C</span></div><div class="field-grid">${proofRow("Nomor pendaftaran", a.registrationNumber)}${proofRow("Nama lengkap", a.name)}${proofRow("Program studi", a.studyChoice)}${proofRow("Pilihan kedua", a.secondChoice)}${proofRow("Jalur pendaftaran", a.path)}${proofRow("Status pendaftaran", a.verification)}</div><div class="form-actions"><button class="button button-outline" data-action="printProof">Cetak / Simpan PDF <span>↗</span></button></div></section>`;
   return "";
 }
@@ -652,8 +769,52 @@ function loginModal(register = false, defaultRole = state.role || "applicant", r
   );
 }
 
+function notificationsMarkup() {
+  const applicant = state.applicant;
+  let statusNotification;
+
+  if (state.role === "admin") {
+    const waiting = state.applicants.filter((item) => ["Diajukan", "Menunggu verifikasi"].includes(item.status)).length;
+    statusNotification = waiting
+      ? { title: `${waiting} pendaftar menunggu verifikasi`, detail: "Periksa berkas yang sudah dikirim pendaftar.", page: "verification-admin" }
+      : { title: "Tidak ada berkas yang menunggu", detail: "Antrian verifikasi sudah diperiksa.", page: "verification-admin" };
+  } else if (applicant.verification === "Perlu perbaikan") {
+    statusNotification = { title: "Berkas perlu diperbaiki", detail: applicant.reviewNote || "Periksa catatan panitia dan kirim ulang berkas.", page: "documents" };
+  } else if (applicant.result && applicant.result !== "Belum diumumkan") {
+    statusNotification = { title: "Hasil seleksi tersedia", detail: `Hasil seleksi: ${applicant.result}.`, page: "result" };
+  } else if (applicant.verification === "Terverifikasi") {
+    statusNotification = { title: "Berkas sudah terverifikasi", detail: "Pantau halaman hasil seleksi untuk pengumuman.", page: "result" };
+  } else if (["Diajukan", "Menunggu verifikasi"].includes(applicant.verification)) {
+    statusNotification = { title: "Berkas sedang diperiksa", detail: "Panitia sedang memeriksa dokumen pendaftaranmu.", page: "verification" };
+  } else {
+    statusNotification = { title: "Pendaftaran belum dikirim", detail: "Lanjutkan pengisian biodata, pilihan studi, dan berkas.", page: "overview" };
+  }
+
+  const announcements = state.announcements.slice(0, 3);
+  return `<div class="notification-heading"><div><h2 id="notificationsTitle">Notifikasi</h2><p>Informasi terbaru untuk akunmu</p></div><button type="button" class="notification-close" data-action="closeNotifications" aria-label="Tutup notifikasi">×</button></div><button type="button" class="notification-entry" data-page="${statusNotification.page}"><span class="notification-symbol">!</span><span><strong>${escapeHTML(statusNotification.title)}</strong><small>${escapeHTML(statusNotification.detail)}</small></span><b>→</b></button><div class="notification-announcements"><h3>Pengumuman terbaru</h3>${announcements.length ? announcements.map((item) => `<article><small>${escapeHTML(item.date)}</small><strong>${escapeHTML(item.title)}</strong><p>${escapeHTML(item.body)}</p></article>`).join("") : '<p class="notification-empty">Belum ada pengumuman.</p>'}</div>`;
+}
+
+function closeNotifications() {
+  const panel = $("#notificationsPanel");
+  const button = $("#notificationsButton");
+  if (!panel || !button) return;
+  panel.classList.add("hidden");
+  button.setAttribute("aria-expanded", "false");
+}
+
 async function handleAction(button) {
   const { action, number, index, name } = button.dataset;
+  if (action === "toggleNotifications") {
+    const panel = $("#notificationsPanel");
+    const button = $("#notificationsButton");
+    if (panel && button) {
+      const opening = panel.classList.contains("hidden");
+      if (opening) panel.innerHTML = notificationsMarkup();
+      panel.classList.toggle("hidden", !opening);
+      button.setAttribute("aria-expanded", String(opening));
+    }
+  }
+  if (action === "closeNotifications") closeNotifications();
   if (action === "home") {
     syncUrlForHome();
     showPublicPage();
@@ -716,12 +877,32 @@ async function handleAction(button) {
     const requiredDocuments = ["ijazah", "identitas", "pasfoto", "rapor"];
     const missingDocuments = requiredDocuments.filter((key) => !state.applicant.documents[key]);
     if (missingDocuments.length) return toast(`Lengkapi ${missingDocuments.length} berkas yang masih belum diunggah.`);
+    const previousVerification = state.applicant.verification;
+    const previousReviewNote = state.applicant.reviewNote;
     state.applicant.verification = "Diajukan";
+    state.applicant.reviewNote = "";
     const own = state.applicants.find((a) => a.number === state.applicant.registrationNumber);
+    const previousOwnStatus = own?.status;
+    const previousOwnReviewNote = own?.reviewNote;
     if (own) own.status = state.applicant.verification;
-    const result = await updateApplicantFieldsInSupabase(state.applicant.registrationNumber, { verification: state.applicant.verification });
-    if (result.error) throw result.error;
-    save(); renderDashboard(); toast("Berkas berhasil dikirim untuk verifikasi.");
+    if (own) own.reviewNote = "";
+    const result = await updateApplicantFieldsInSupabase(state.applicant.registrationNumber, {
+      verification: state.applicant.verification,
+      review_note: ""
+    });
+    if (result.error) {
+      state.applicant.verification = previousVerification;
+      state.applicant.reviewNote = previousReviewNote;
+      if (own) {
+        own.status = previousOwnStatus;
+        own.reviewNote = previousOwnReviewNote;
+      }
+      renderDashboard();
+      throw result.error;
+    }
+    save();
+    showPage("verification");
+    toast("Berkas berhasil dikirim. Pantau status pemeriksaan di sini.");
   }
   if (action === "printProof") window.print();
   if (action === "reviewApplicant" || action === "editApplicant") {
@@ -794,9 +975,11 @@ async function handleAction(button) {
 }
 
 document.addEventListener("click", (event) => {
+  if (!event.target.closest(".notification-wrap")) closeNotifications();
   const pageControl = event.target.closest("[data-page]");
   const actionControl = event.target.closest("[data-action]");
   if (pageControl) {
+    closeNotifications();
     event.preventDefault();
     const page = pageControl.dataset.page;
     if (page === "home") {
@@ -811,6 +994,10 @@ document.addEventListener("click", (event) => {
     });
   }
   if (event.target.classList.contains("modal-backdrop") && $("#modalForm")?.dataset.requiredAuth !== "true") $("#modalRoot").innerHTML = "";
+});
+
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") closeNotifications();
 });
 
 document.addEventListener("change", async (event) => {
@@ -879,7 +1066,7 @@ document.addEventListener("change", async (event) => {
     }
   }
   if (event.target.id === "statusFilter" || event.target.id === "verificationFilter") filterApplicants();
-  if (event.target.matches('input[name="studyChoice"],input[name="path"]')) event.target.closest(".choice-card").parentElement.querySelectorAll(".choice-card").forEach((card) => card.classList.toggle("selected", card.contains(event.target)));
+  if (event.target.matches('input[name="studyChoice"],input[name="secondChoice"],input[name="path"]')) event.target.closest(".choice-card").parentElement.querySelectorAll(".choice-card").forEach((card) => card.classList.toggle("selected", card.contains(event.target)));
 });
 
 document.addEventListener("submit", async (event) => {
@@ -895,8 +1082,8 @@ document.addEventListener("submit", async (event) => {
       return;
     }
     save();
-    renderDashboard();
-    toast("Biodata & data pribadi tersimpan ke Supabase.");
+    showPage("choices");
+    toast("Biodata tersimpan. Berikutnya, pilih program studi dan jalur.");
   }
   if (event.target.id === "choicesForm") {
     event.preventDefault();
@@ -916,7 +1103,9 @@ document.addEventListener("submit", async (event) => {
       toast("Pilihan program studi gagal disimpan ke Supabase.");
       return;
     }
-    save(); renderDashboard(); toast("Pilihan program studi berhasil disimpan.");
+    save();
+    showPage("documents");
+    toast("Pilihan tersimpan. Berikutnya, unggah berkas persyaratan.");
   }
 });
 

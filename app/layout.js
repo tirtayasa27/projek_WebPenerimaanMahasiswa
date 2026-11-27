@@ -7,6 +7,7 @@ export default function RootLayout({ children }) {
   return (
     <html lang="id">
       <head>
+        <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
         <link
@@ -15,6 +16,7 @@ export default function RootLayout({ children }) {
         />
         <link rel="stylesheet" href="/styles.css" />
         <link rel="stylesheet" href="/password.css" />
+        <link rel="stylesheet" href="/flow.css" />
       </head>
       <body>{children}</body>
     </html>
